@@ -54,7 +54,7 @@ export class PaperTrader {
 
     // Trading parameters
     this.minEdge = options.minEdge || 0.10; // 10% minimum edge
-    this.maxPositionPct = options.maxPositionPct || 0.05; // Max 5% of balance per trade (reduced from 10%)
+    this.maxPositionPct = options.maxPositionPct || 0.10; // Max 10% of balance per trade
     this.cooldownMs = options.cooldownMs || 30000; // 30 seconds between trades
     this.lastTradeTime = null;
     this.autoResetThreshold = 10; // Auto-reset when balance falls below $10
