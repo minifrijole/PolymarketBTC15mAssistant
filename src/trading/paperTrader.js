@@ -29,34 +29,52 @@ export class PaperTrader {
     
     if (saved && !options.reset) {
       // Resume from saved state
-      this.startingBalance = saved.startingBalance;
+      this.startingBalance = saved.startingBalance || 1000;
       this.balance = saved.balance;
       this.trades = saved.trades || [];
       this.positions = new Map(saved.positions || []);
       this.enabled = saved.enabled ?? false;
       this.startedAt = saved.startedAt;
       this.stats = saved.stats || this.initStats();
-      console.log(`[PaperTrader] Resumed with balance: $${this.balance.toFixed(2)}`);
+      this.sessionHistory = saved.sessionHistory || [];
+      this.lifetimeStats = saved.lifetimeStats || this.initLifetimeStats();
+      console.log(`[PaperTrader] Resumed with balance: $${this.balance.toFixed(2)} | Sessions: ${this.sessionHistory.length}`);
     } else {
       // Fresh start
-      this.startingBalance = options.startingBalance || 500;
+      this.startingBalance = options.startingBalance || 1000;
       this.balance = this.startingBalance;
       this.trades = [];
       this.positions = new Map();
       this.enabled = false;
       this.startedAt = new Date().toISOString();
       this.stats = this.initStats();
+      this.sessionHistory = [];
+      this.lifetimeStats = this.initLifetimeStats();
     }
 
     // Trading parameters
     this.minEdge = options.minEdge || 0.10; // 10% minimum edge
-    this.maxPositionPct = options.maxPositionPct || 0.10; // Max 10% of balance per trade
+    this.maxPositionPct = options.maxPositionPct || 0.05; // Max 5% of balance per trade (reduced from 10%)
     this.cooldownMs = options.cooldownMs || 30000; // 30 seconds between trades
     this.lastTradeTime = null;
+    this.autoResetThreshold = 10; // Auto-reset when balance falls below $10
     
     // Track current market for settlement
     this.currentMarketSlug = null;
     this.pendingSettlement = null;
+  }
+  
+  initLifetimeStats() {
+    return {
+      totalSessions: 0,
+      totalTrades: 0,
+      totalWins: 0,
+      totalLosses: 0,
+      totalWon: 0,
+      totalLost: 0,
+      sessionsWon: 0,  // Sessions that ended in profit
+      sessionsLost: 0  // Sessions that got wiped
+    };
   }
 
   initStats() {
@@ -90,7 +108,43 @@ export class PaperTrader {
     return this.enabled;
   }
 
-  reset(startingBalance = 500) {
+  reset(startingBalance = 1000, recordSession = true) {
+    // Record the ended session in history
+    if (recordSession && this.stats.totalTrades > 0) {
+      const sessionPnl = this.balance - this.startingBalance;
+      const session = {
+        id: this.sessionHistory.length + 1,
+        startedAt: this.startedAt,
+        endedAt: new Date().toISOString(),
+        startingBalance: this.startingBalance,
+        endingBalance: this.balance,
+        pnl: sessionPnl,
+        pnlPct: ((this.balance / this.startingBalance) - 1) * 100,
+        trades: this.stats.totalTrades,
+        wins: this.stats.wins,
+        losses: this.stats.losses,
+        winRate: this.stats.totalTrades > 0 ? (this.stats.wins / this.stats.totalTrades * 100).toFixed(1) : 0,
+        wiped: this.balance < this.autoResetThreshold
+      };
+      
+      this.sessionHistory.push(session);
+      
+      // Update lifetime stats
+      this.lifetimeStats.totalSessions++;
+      this.lifetimeStats.totalTrades += this.stats.totalTrades;
+      this.lifetimeStats.totalWins += this.stats.wins;
+      this.lifetimeStats.totalLosses += this.stats.losses;
+      this.lifetimeStats.totalWon += this.stats.totalWon;
+      this.lifetimeStats.totalLost += this.stats.totalLost;
+      if (sessionPnl > 0) {
+        this.lifetimeStats.sessionsWon++;
+      } else {
+        this.lifetimeStats.sessionsLost++;
+      }
+      
+      console.log(`[PaperTrader] Session #${session.id} ended: ${session.wiped ? 'WIPED' : sessionPnl >= 0 ? 'PROFIT' : 'LOSS'} | PnL: $${sessionPnl.toFixed(2)} (${session.pnlPct.toFixed(1)}%)`);
+    }
+    
     this.startingBalance = startingBalance;
     this.balance = startingBalance;
     this.trades = [];
@@ -98,8 +152,18 @@ export class PaperTrader {
     this.startedAt = new Date().toISOString();
     this.stats = this.initStats();
     this.lastTradeTime = null;
-    console.log(`[PaperTrader] Reset with $${startingBalance}`);
+    console.log(`[PaperTrader] Reset with $${startingBalance} | Total sessions: ${this.sessionHistory.length}`);
     this.save();
+  }
+  
+  checkAutoReset() {
+    // Auto-reset if balance falls below threshold and no open positions
+    if (this.balance < this.autoResetThreshold && this.positions.size === 0) {
+      console.log(`[PaperTrader] Balance below $${this.autoResetThreshold} - Auto-resetting...`);
+      this.reset(this.startingBalance, true);
+      return true;
+    }
+    return false;
   }
 
   save() {
@@ -110,13 +174,23 @@ export class PaperTrader {
       positions: Array.from(this.positions.entries()),
       enabled: this.enabled,
       startedAt: this.startedAt,
-      stats: this.stats
+      stats: this.stats,
+      sessionHistory: this.sessionHistory,
+      lifetimeStats: this.lifetimeStats
     });
   }
 
   canTrade() {
     if (!this.enabled) return { allowed: false, reason: "Paper trading disabled" };
-    if (this.balance <= 0) return { allowed: false, reason: "No balance remaining" };
+    
+    // Check for auto-reset
+    if (this.checkAutoReset()) {
+      return { allowed: false, reason: "Session reset - waiting for next signal" };
+    }
+    
+    if (this.balance < this.autoResetThreshold) {
+      return { allowed: false, reason: "Balance too low - waiting for positions to settle" };
+    }
     
     if (this.lastTradeTime) {
       const elapsed = Date.now() - this.lastTradeTime;
@@ -310,6 +384,9 @@ export class PaperTrader {
   }
 
   getStatus() {
+    // Check for auto-reset before returning status
+    this.checkAutoReset();
+    
     const openPositions = Array.from(this.positions.values()).filter(t => t.status === "OPEN");
     const openValue = openPositions.reduce((sum, t) => sum + t.cost, 0);
 
@@ -322,6 +399,7 @@ export class PaperTrader {
       pnl: (this.balance + openValue) - this.startingBalance,
       pnlPct: (((this.balance + openValue) / this.startingBalance) - 1) * 100,
       startedAt: this.startedAt,
+      currentSession: this.sessionHistory.length + 1,
       stats: {
         ...this.stats,
         winRate: this.stats.totalTrades > 0 ? (this.stats.wins / this.stats.totalTrades * 100).toFixed(1) : 0,
@@ -329,6 +407,14 @@ export class PaperTrader {
         avgLoss: this.stats.losses > 0 ? (this.stats.totalLost / this.stats.losses).toFixed(2) : 0,
         profitFactor: this.stats.totalLost > 0 ? (this.stats.totalWon / this.stats.totalLost).toFixed(2) : "∞"
       },
+      lifetimeStats: {
+        ...this.lifetimeStats,
+        winRate: this.lifetimeStats.totalTrades > 0 
+          ? (this.lifetimeStats.totalWins / this.lifetimeStats.totalTrades * 100).toFixed(1) 
+          : 0,
+        netPnl: this.lifetimeStats.totalWon - this.lifetimeStats.totalLost
+      },
+      sessionHistory: this.sessionHistory.slice(-10).reverse(), // Last 10 sessions
       openPositions,
       recentTrades: this.trades.slice(-20).reverse()
     };
@@ -336,4 +422,4 @@ export class PaperTrader {
 }
 
 // Export singleton
-export const paperTrader = new PaperTrader({ startingBalance: 500 });
+export const paperTrader = new PaperTrader({ startingBalance: 1000 });
