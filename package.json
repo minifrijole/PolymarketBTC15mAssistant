@@ -4,11 +4,15 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "web": "node src/server.js"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "ethers": "^6.11.1",
+    "express": "^5.2.1",
     "https-proxy-agent": "^7.0.6",
+    "node-fetch": "^3.3.2",
     "socks-proxy-agent": "^8.0.5",
     "undici": "^6.21.3",
     "ws": "^8.18.0"

@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BTC 15m Trading Assistant</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            dark: {
+              950: '#080810',
+              900: '#0d0d1a',
+              800: '#13132b',
+              700: '#1a1a3e',
+              600: '#252552',
+              500: '#2d2d5a',
+            },
+            accent: {
+              purple: '#a855f7',
+              blue: '#6366f1',
+              indigo: '#818cf8',
+              light: '#c4b5fd',
+            },
+            up: '#10b981',
+            down: '#ef4444',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1a1a3e; }
+    ::-webkit-scrollbar-thumb { background: #4c4c7a; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+    
+    .glow-purple { box-shadow: 0 0 40px rgba(168, 85, 247, 0.2); }
+    .glow-up { box-shadow: 0 0 30px rgba(16, 185, 129, 0.15); }
+    .glow-down { box-shadow: 0 0 30px rgba(239, 68, 68, 0.15); }
+    
+    .icon { display: inline-flex; align-items: center; justify-content: center; }
+    .icon svg { width: 1em; height: 1em; }
+    
+    /* Sidebar with collapsed state showing icons */
+    .sidebar {
+      transition: width 0.3s ease;
+      width: 280px;
+    }
+    .sidebar.collapsed {
+      width: 56px;
+    }
+    .sidebar.collapsed .sidebar-content { display: none; }
+    .sidebar.collapsed .sidebar-collapsed { display: flex; }
+    .sidebar .sidebar-collapsed { display: none; }
+    
+    /* Notification badge pulse */
+    @keyframes pulse-badge {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+    .badge-pulse { animation: pulse-badge 2s ease-in-out infinite; }
+    
+    /* Tooltip styles - using fixed positioning to avoid clipping */
+    .tooltip-trigger {
+      position: relative;
+      cursor: help;
+      display: inline-flex;
+      align-items: center;
+    }
+    .indicator-card {
+      overflow: visible !important;
+      position: relative;
+    }
+    #indicators {
+      overflow: visible !important;
+    }
+    
+    /* Smooth transitions for updating values */
+    #current-price, #target-price, #momentum-value, #price-delta {
+      transition: color 0.3s ease, transform 0.15s ease;
+    }
+    
+    /* Subtle pulse animation for price updates */
+    @keyframes pricePulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+      100% { transform: scale(1); }
+    }
+    
+    .price-updated {
+      animation: pricePulse 0.3s ease-out;
+    }
+    
+    /* Chart container glow effect */
+    #priceChart {
+      filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.2));
+    }
+    
+    /* Smooth number transitions */
+    .stat-value {
+      transition: all 0.3s ease;
+    }
+    
+    /* Chart control buttons */
+    .chart-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 28px;
+    }
+    .chart-btn:active {
+      transform: scale(0.95);
+    }
+    
+    /* Glow animation for strong signals */
+    @keyframes signalGlow {
+      0%, 100% { box-shadow: 0 0 20px rgba(34, 197, 94, 0.3); }
+      50% { box-shadow: 0 0 30px rgba(34, 197, 94, 0.5); }
+    }
+    
+    .signal-glow-up {
+      animation: signalGlow 2s ease-in-out infinite;
+    }
+    
+    @keyframes signalGlowDown {
+      0%, 100% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.3); }
+      50% { box-shadow: 0 0 30px rgba(239, 68, 68, 0.5); }
+    }
+    
+    .signal-glow-down {
+      animation: signalGlowDown 2s ease-in-out infinite;
+    }
+    .tooltip-trigger .tooltip-content {
+      visibility: hidden;
+      opacity: 0;
+      position: fixed;
+      background: #1a1a3e;
+      border: 1px solid #4c4c7a;
+      color: #e0e0e0;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      width: 220px;
+      text-align: left;
+      z-index: 9999;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      pointer-events: none;
+      font-weight: 400;
+    }
+    .tooltip-trigger:hover .tooltip-content {
+      visibility: visible;
+      opacity: 1;
+    }
+  </style>
+</head>
+<body class="bg-dark-950 text-gray-100">
+  <div id="app" class="h-screen flex flex-col overflow-hidden">
+    <!-- Loading State -->
+    <div id="loading" class="flex items-center justify-center h-screen">
+      <div class="text-center">
+        <div class="w-10 h-10 border-2 border-accent-purple border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p class="text-gray-500 text-sm">Connecting to market data...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart container kept outside main render to preserve it -->
+  <template id="chart-template">
+    <canvas id="priceChart"></canvas>
+  </template>
+
+  <script>
+    const icons = {
+      bitcoin: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.767 19.089c4.924.868 6.14-6.025 1.216-6.894m-1.216 6.894L5.86 18.047m5.908 1.042-.347 1.97m1.563-8.864c4.924.869 6.14-6.025 1.215-6.893m-1.215 6.893-3.94-.694m5.155-6.2L8.29 4.26m5.908 1.042.348-1.97M7.48 20.364l3.126-17.727"/></svg>',
+      trendUp: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
+      trendDown: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>',
+      target: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+      activity: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+      barChart: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>',
+      dollarSign: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+      refresh: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>',
+      play: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+      wallet: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>',
+      x: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+      list: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>',
+      check: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+      clock: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+      info: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+      zoomIn: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></svg>',
+      zoomOut: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/></svg>',
+      reset: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>',
+    };
+
+    let data = null;
+    let paperStatus = null;
+    let priceHistory = [];
+    let chart = null;
+    let sidebarOpen = false;
+    let initialized = false;
+    const MAX_HISTORY = 300; // 5 minutes of history
+
+    function zoomChart(direction) {
+      if (!chart) return;
+      isLiveMode = false;
+      updateLiveButton();
+      if (direction === 'in') {
+        chart.zoom(1.2);
+      } else {
+        chart.zoom(0.8);
+      }
+    }
+
+    function resetChartZoom() {
+      if (!chart) return;
+      chart.resetZoom();
+      isLiveMode = true;
+      updateLiveButton();
+    }
+    
+    function goLive() {
+      isLiveMode = true;
+      updateLiveButton();
+    }
+    
+    function updateLiveButton() {
+      const btn = document.getElementById('live-btn');
+      if (btn) {
+        if (isLiveMode) {
+          btn.className = 'chart-btn px-2 py-1 bg-up/20 text-up rounded text-xs font-medium transition-all flex items-center gap-1';
+          btn.innerHTML = '<span class="w-2 h-2 bg-up rounded-full animate-pulse"></span> LIVE';
+        } else {
+          btn.className = 'chart-btn px-2 py-1 bg-dark-600 hover:bg-up/20 hover:text-up text-gray-400 rounded text-xs font-medium transition-all';
+          btn.innerHTML = 'GO LIVE';
+        }
+      }
+    }
+
+    function toggleSidebar() {
+      sidebarOpen = !sidebarOpen;
+      const sidebar = document.getElementById('sidebar');
+      if (sidebar) {
+        sidebar.classList.toggle('collapsed', !sidebarOpen);
+      }
+    }
+
+    function getNotificationCount() {
+      if (!paperStatus) return 0;
+      // Count only open positions (not closed trades)
+      return paperStatus.openPositions?.length || 0;
+    }
+
+    // Tooltip definitions for indicators
+    const indicatorTooltips = {
+      trend: "Shows if price has been consistently going UP (green) or DOWN (red). More candles = stronger trend.",
+      rsi: "Momentum score 0-100. Above 50 = buyers winning. Above 70 = overbought (might drop). Below 30 = oversold (might rise).",
+      macd: "Shows if price momentum is building or fading. BUY = momentum increasing. SELL = momentum decreasing.",
+      vwap: "Average price weighted by trading volume. ABOVE = price is higher than average (bullish). BELOW = bearish.",
+      delta1m: "How much the price changed in the last 1 minute. Green = went up. Red = went down.",
+      delta3m: "How much the price changed in the last 3 minutes. Shows short-term direction."
+    };
+
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/data');
+        if (!res.ok) throw new Error('Not ready');
+        data = await res.json();
+        if (data?.prices?.chainlink) {
+          priceHistory.push({
+            time: Date.now(),
+            price: data.prices.chainlink,
+            target: data.prices.priceToBeat,
+          });
+          if (priceHistory.length > MAX_HISTORY) priceHistory.shift();
+        }
+        render();
+        updateChart();
+      } catch (e) { console.error(e); }
+    }
+
+    async function fetchPaperStatus() {
+      try {
+        const res = await fetch('/api/paper/status');
+        paperStatus = await res.json();
+        render();
+      } catch (e) { paperStatus = null; }
+    }
+
+    async function togglePaperTrading() {
+      const enabled = !paperStatus?.enabled;
+      await fetch(enabled ? '/api/paper/enable' : '/api/paper/disable', { method: 'POST' });
+      await fetchPaperStatus();
+    }
+
+    async function resetPaperTrading() {
+      if (!confirm('Reset practice account to $500?')) return;
+      await fetch('/api/paper/reset', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startingBalance: 500 })
+      });
+      await fetchPaperStatus();
+    }
+
+    function formatTime(minutes) {
+      if (!minutes && minutes !== 0) return '--:--';
+      const mins = Math.floor(minutes);
+      const secs = Math.floor((minutes - mins) * 60);
+      return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    function formatPrice(price, decimals = 2) {
+      if (price === null || price === undefined) return '-';
+      return '$' + Number(price).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    }
+
+    function formatTimeAgo(timestamp) {
+      const diff = Date.now() - new Date(timestamp).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'Just now';
+      if (mins < 60) return `${mins}m ago`;
+      return `${Math.floor(mins / 60)}h ago`;
+    }
+
+    // Custom crosshair plugin for the chart
+    const crosshairPlugin = {
+      id: 'crosshair',
+      afterDraw: (chart) => {
+        if (chart.tooltip?._active?.length) {
+          const ctx = chart.ctx;
+          const x = chart.tooltip._active[0].element.x;
+          const topY = chart.scales.y.top;
+          const bottomY = chart.scales.y.bottom;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.setLineDash([3, 3]);
+          ctx.moveTo(x, topY);
+          ctx.lineTo(x, bottomY);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = 'rgba(168, 85, 247, 0.5)';
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    };
+
+    function initChart() {
+      const ctx = document.getElementById('priceChart');
+      if (!ctx || chart) return;
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          datasets: [
+            {
+              label: 'BTC Price',
+              data: [],
+              parsing: { xAxisKey: 'x', yAxisKey: 'y' },
+              borderColor: '#a855f7',
+              backgroundColor: (context) => {
+                const chart = context.chart;
+                const {ctx, chartArea} = chart;
+                if (!chartArea) return 'rgba(168, 85, 247, 0.1)';
+                const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                gradient.addColorStop(0, 'rgba(168, 85, 247, 0.25)');
+                gradient.addColorStop(1, 'rgba(168, 85, 247, 0.02)');
+                return gradient;
+              },
+              fill: true,
+              tension: 0.4,
+              pointRadius: 0,
+              pointHoverRadius: 6,
+              pointHoverBackgroundColor: '#a855f7',
+              pointHoverBorderColor: '#fff',
+              pointHoverBorderWidth: 2,
+              borderWidth: 2.5,
+              cubicInterpolationMode: 'monotone'
+            },
+            {
+              label: 'Target',
+              data: [],
+              parsing: { xAxisKey: 'x', yAxisKey: 'y' },
+              borderColor: '#6366f1',
+              borderDash: [8, 4],
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false, // We handle animation ourselves with requestAnimationFrame
+          interaction: { intersect: false, mode: 'index' },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(26, 26, 62, 0.95)',
+              borderColor: '#4c4c7a',
+              borderWidth: 1,
+              titleColor: '#fff',
+              bodyColor: '#c4b5fd',
+              padding: 12,
+              displayColors: true,
+              animation: {
+                duration: 150
+              },
+              callbacks: {
+                label: ctx => `${ctx.dataset.label}: ${formatPrice(ctx.raw)}`
+              }
+            },
+            crosshair: false,
+            zoom: {
+              pan: {
+                enabled: true,
+                mode: 'x',
+                modifierKey: null,
+                onPanStart: () => { isLiveMode = false; updateLiveButton(); },
+              },
+              zoom: {
+                wheel: {
+                  enabled: true,
+                  speed: 0.1
+                },
+                pinch: {
+                  enabled: true
+                },
+                drag: {
+                  enabled: false
+                },
+                mode: 'x',
+                onZoomStart: () => { isLiveMode = false; updateLiveButton(); },
+              },
+              limits: {
+                x: { minRange: 5000 }
+              }
+            },
+            annotation: {
+              annotations: {
+                targetLine: {
+                  type: 'line',
+                  yMin: 0,
+                  yMax: 0,
+                  borderColor: '#6366f1',
+                  borderWidth: 2,
+                  borderDash: [8, 4],
+                  label: {
+                    display: true,
+                    content: 'TARGET',
+                    position: 'start',
+                    backgroundColor: '#6366f1',
+                    color: '#fff',
+                    font: { size: 10, weight: 'bold' },
+                    padding: 4
+                  }
+                },
+                currentLine: {
+                  type: 'line',
+                  yMin: 0,
+                  yMax: 0,
+                  borderColor: '#a855f7',
+                  borderWidth: 2,
+                  label: {
+                    display: true,
+                    content: 'NOW',
+                    position: 'end',
+                    backgroundColor: '#a855f7',
+                    color: '#fff',
+                    font: { size: 10, weight: 'bold' },
+                    padding: 4
+                  }
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              type: 'linear',
+              display: true,
+              grid: { color: 'rgba(255,255,255,0.03)' },
+              ticks: { 
+                color: '#6b7280', 
+                maxTicksLimit: 6, 
+                font: { size: 10 },
+                callback: function(value) {
+                  const d = new Date(value);
+                  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                }
+              }
+            },
+            y: {
+              position: 'right',
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: {
+                color: '#9ca3af',
+                callback: v => formatPrice(v, 0)
+              }
+            }
+          }
+        },
+        plugins: [crosshairPlugin]
+      });
+    }
+
+    // Streaming chart state
+    let animationFrame = null;
+    let isLiveMode = true; // Auto-scroll with live data
+    
+    function lerp(start, end, t) {
+      return start + (end - start) * t;
+    }
+    
+    function animateChart() {
+      if (!chart || priceHistory.length < 2) {
+        animationFrame = requestAnimationFrame(animateChart);
+        return;
+      }
+      
+      const now = Date.now();
+      
+      // Create smooth streaming data with interpolated "now" point
+      const lastReal = priceHistory[priceHistory.length - 1];
+      const secondLastReal = priceHistory[priceHistory.length - 2];
+      
+      // Calculate how far we are into the next second
+      const timeSinceLast = now - lastReal.time;
+      const interpolationT = Math.min(timeSinceLast / 1000, 1);
+      
+      // Predict/interpolate the current price based on recent trend
+      const priceTrend = lastReal.price - secondLastReal.price;
+      const interpolatedPrice = lastReal.price + (priceTrend * interpolationT * 0.5); // Damped prediction
+      const interpolatedTime = lastReal.time + timeSinceLast;
+      
+      // Build chart data with the interpolated "live" point
+      const chartData = [];
+      const chartTargets = [];
+      const chartLabels = [];
+      
+      // Add all historical points
+      for (const point of priceHistory) {
+        chartData.push({ x: point.time, y: point.price });
+        chartTargets.push({ x: point.time, y: point.target });
+      }
+      
+      // Add the interpolated "now" point for smooth streaming
+      chartData.push({ x: interpolatedTime, y: interpolatedPrice });
+      chartTargets.push({ x: interpolatedTime, y: lastReal.target });
+      
+      // Update chart
+      chart.data.datasets[0].data = chartData;
+      chart.data.datasets[1].data = chartTargets;
+      
+      // Update x-axis range to create smooth scrolling effect (only in live mode)
+      if (isLiveMode) {
+        const displayDuration = Math.min(priceHistory.length, 60) * 1000; // Show ~60 seconds
+        const xMax = interpolatedTime;
+        const xMin = xMax - displayDuration;
+        
+        chart.options.scales.x.min = xMin;
+        chart.options.scales.x.max = xMax;
+      }
+      
+      // Update annotation lines
+      const currentTarget = lastReal.target;
+      if (chart.options.plugins.annotation.annotations.targetLine) {
+        chart.options.plugins.annotation.annotations.targetLine.yMin = currentTarget;
+        chart.options.plugins.annotation.annotations.targetLine.yMax = currentTarget;
+      }
+      if (chart.options.plugins.annotation.annotations.currentLine) {
+        chart.options.plugins.annotation.annotations.currentLine.yMin = interpolatedPrice;
+        chart.options.plugins.annotation.annotations.currentLine.yMax = interpolatedPrice;
+      }
+      
+      chart.update('none');
+      
+      animationFrame = requestAnimationFrame(animateChart);
+    }
+    
+    function updateChart() {
+      if (!chart || priceHistory.length < 2) return;
+      
+      // Start animation loop if not running
+      if (!animationFrame) {
+        animateChart();
+      }
+      
+      // Update data points counter
+      const dataPointsEl = document.getElementById('data-points');
+      if (dataPointsEl) {
+        dataPointsEl.textContent = priceHistory.length;
+      }
+    }
+
+    function getMarketDirection(data) {
+      // Determine current direction based on price vs target
+      const priceDelta = data.prices?.priceDelta || 0;
+      const isAboveTarget = priceDelta >= 0;
+      
+      // Count bullish vs bearish indicators
+      let bullishCount = 0;
+      let bearishCount = 0;
+      
+      if (data.indicators?.heikenAshi?.color === 'green') bullishCount++;
+      else if (data.indicators?.heikenAshi?.color === 'red') bearishCount++;
+      
+      if (data.indicators?.rsi?.value > 50) bullishCount++;
+      else if (data.indicators?.rsi?.value < 50) bearishCount++;
+      
+      if (data.indicators?.macd?.hist > 0) bullishCount++;
+      else if (data.indicators?.macd?.hist < 0) bearishCount++;
+      
+      if (data.indicators?.vwap?.dist > 0) bullishCount++;
+      else if (data.indicators?.vwap?.dist < 0) bearishCount++;
+      
+      if (data.indicators?.delta?.m1 > 0) bullishCount++;
+      else if (data.indicators?.delta?.m1 < 0) bearishCount++;
+      
+      const direction = bullishCount > bearishCount ? 'UP' : bullishCount < bearishCount ? 'DOWN' : (isAboveTarget ? 'UP' : 'DOWN');
+      
+      return {
+        direction,
+        bullishCount,
+        bearishCount,
+        total: bullishCount + bearishCount
+      };
+    }
+
+    function getSignalInfo(signal, data) {
+      const market = getMarketDirection(data);
+      const hasBuySignal = signal && signal.action !== 'HOLD' && signal.edge > 0;
+      
+      if (hasBuySignal) {
+        // There's a buy signal - show it prominently
+        const side = signal.side;
+        const edge = signal.edge?.toFixed(1) || 0;
+        const strength = signal.strength;
+        
+        return {
+          title: `BUY ${side}`,
+          subtitle: `${edge}% edge detected - ${strength === 'STRONG' ? 'Strong opportunity' : strength === 'GOOD' ? 'Good opportunity' : 'Weak signal'}`,
+          icon: side === 'UP' ? icons.trendUp : icons.trendDown,
+          color: side === 'UP' ? 'up' : 'down',
+          bgClass: strength === 'STRONG' ? (side === 'UP' ? 'bg-up/20 border-up/50 signal-glow-up' : 'bg-down/20 border-down/50 signal-glow-down') : (side === 'UP' ? 'bg-up/10 border-up/30' : 'bg-down/10 border-down/30'),
+          showBuy: true,
+          signal
+        };
+      } else {
+        // No buy signal - show current market direction
+        const direction = market.direction;
+        const confidence = Math.max(market.bullishCount, market.bearishCount);
+        const total = market.total || 5;
+        
+        return {
+          title: `Leaning ${direction}`,
+          subtitle: `${confidence}/${total} indicators agree - No edge to trade yet`,
+          icon: direction === 'UP' ? icons.trendUp : icons.trendDown,
+          color: direction === 'UP' ? 'up' : 'down',
+          bgClass: 'bg-dark-700 border-dark-600',
+          showBuy: false,
+          signal: null
+        };
+      }
+    }
+
+    function render() {
+      if (!data) return;
+      
+      const loading = document.getElementById('loading');
+      if (loading) loading.remove();
+      
+      const signal = data.signal || {};
+      const signalInfo = getSignalInfo(signal, data);
+      const pnl = paperStatus?.pnl || 0;
+      const pnlPct = paperStatus?.pnlPct || 0;
+      const timeLeft = data.timing?.timeLeftMin;
+      const timeColor = timeLeft > 10 ? 'text-up' : timeLeft > 5 ? 'text-yellow-400' : 'text-down';
+      const priceDelta = data.prices?.priceDelta || 0;
+      const market = getMarketDirection(data);
+
+      // Only rebuild DOM on first render, then update specific elements
+      if (!initialized) {
+        initialized = true;
+        document.getElementById('app').innerHTML = `
+          <!-- Header -->
+          <header class="bg-dark-800/80 backdrop-blur border-b border-dark-600 px-4 py-3 flex-shrink-0">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="w-9 h-9 bg-gradient-to-br from-accent-purple to-accent-blue rounded-lg flex items-center justify-center text-white">
+                  ${icons.bitcoin}
+                </div>
+                <div>
+                  <h1 class="font-semibold">BTC 15-Minute Predictor</h1>
+                  <p class="text-xs text-gray-500">Polymarket Analysis</p>
+                </div>
+              </div>
+              
+              <div class="flex items-center gap-6">
+                <div class="flex items-center gap-2 text-sm">
+                  <span class="text-gray-500">Binance:</span>
+                  <span id="binance-price" class="font-medium">-</span>
+                </div>
+                <div class="h-8 w-px bg-dark-600"></div>
+                <div class="text-center">
+                  <div class="text-xs text-gray-500 mb-0.5">Time Left</div>
+                  <div id="time-left" class="text-xl font-bold tabular-nums">--:--</div>
+                </div>
+                <div class="h-8 w-px bg-dark-600"></div>
+                <div class="flex items-center gap-2">
+                  <span class="icon text-accent-purple">${icons.wallet}</span>
+                  <div>
+                    <div class="text-xs text-gray-500">Practice</div>
+                    <div id="practice-balance" class="font-semibold">$500.00</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div class="flex flex-1 min-h-0">
+            <!-- Left Sidebar - Collapsible -->
+            <aside id="sidebar" class="sidebar collapsed bg-dark-800 border-r border-dark-600 flex flex-col flex-shrink-0">
+              <!-- Collapsed View (icons only) -->
+              <div class="sidebar-collapsed flex-col items-center py-4 h-full">
+                <button onclick="toggleSidebar()" class="w-10 h-10 rounded-lg bg-dark-700 hover:bg-dark-600 flex items-center justify-center text-gray-400 hover:text-white transition-colors mb-4 relative">
+                  <span class="icon">${icons.activity}</span>
+                  <span id="notification-badge-collapsed" class="hidden absolute -top-1 -right-1 w-5 h-5 bg-accent-purple text-white text-xs font-bold rounded-full flex items-center justify-center badge-pulse">0</span>
+                </button>
+                <div class="flex-1"></div>
+                <div id="collapsed-win-loss" class="text-center mb-2">
+                  <div class="text-xs text-up font-medium">0</div>
+                  <div class="text-xs text-gray-600">/</div>
+                  <div class="text-xs text-down font-medium">0</div>
+                </div>
+              </div>
+              
+              <!-- Expanded View (full content) -->
+              <div class="sidebar-content flex flex-col h-full">
+                <div class="p-4 border-b border-dark-600 flex items-center justify-between">
+                  <div class="flex items-center gap-2 text-sm font-medium">
+                    <span class="icon text-accent-purple">${icons.activity}</span>
+                    Trade Activity
+                    <span id="notification-badge" class="hidden ml-1 w-5 h-5 bg-accent-purple text-white text-xs font-bold rounded-full flex items-center justify-center">0</span>
+                  </div>
+                  <button onclick="toggleSidebar()" class="w-7 h-7 rounded-lg bg-dark-700 hover:bg-dark-600 flex items-center justify-center text-gray-400 hover:text-white transition-colors">
+                    <span class="icon">${icons.x}</span>
+                  </button>
+                </div>
+                
+                <div id="trade-list" class="flex-1 overflow-y-auto p-3">
+                  <div class="text-center py-12 text-gray-500">
+                    <span class="icon text-4xl text-gray-600 mb-3 block">${icons.activity}</span>
+                    <p class="text-sm">No trades yet</p>
+                  </div>
+                </div>
+
+                <div class="p-4 border-t border-dark-600 bg-dark-800/50">
+                  <div id="market-slug" class="text-xs text-gray-500 truncate">Loading...</div>
+                </div>
+              </div>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+              <!-- Signal Banner -->
+              <div class="p-4 pb-3 flex-shrink-0">
+                <div id="signal-banner" class="border rounded-xl p-4">
+                  <!-- Updated by JS -->
+                </div>
+              </div>
+
+              <!-- Key Numbers -->
+              <div class="px-4 pb-3 flex-shrink-0">
+                <div class="grid grid-cols-4 gap-3">
+                  <div class="bg-dark-800/50 border border-dark-600 rounded-xl p-3">
+                    <div class="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                      <span class="icon">${icons.target}</span>
+                      Target Price
+                    </div>
+                    <div id="target-price" class="text-xl font-semibold text-accent-indigo">-</div>
+                    <div class="text-xs text-gray-500 mt-0.5">Must end above for UP to win</div>
+                  </div>
+                  
+                  <div class="bg-dark-800/50 border border-dark-600 rounded-xl p-3">
+                    <div class="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                      <span class="icon">${icons.dollarSign}</span>
+                      Current Price
+                    </div>
+                    <div id="current-price" class="text-xl font-semibold">-</div>
+                    <div id="price-delta" class="text-xs mt-0.5">-</div>
+                  </div>
+
+                  <div class="bg-dark-800/50 border border-dark-600 rounded-xl p-3">
+                    <div class="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                      <span class="icon text-up">${icons.trendUp}</span>
+                      UP Price
+                    </div>
+                    <div id="up-price" class="text-xl font-semibold text-up">-</div>
+                    <div id="up-model" class="text-xs text-gray-500 mt-0.5">-</div>
+                  </div>
+
+                  <div class="bg-dark-800/50 border border-dark-600 rounded-xl p-3">
+                    <div class="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                      <span class="icon text-down">${icons.trendDown}</span>
+                      DOWN Price
+                    </div>
+                    <div id="down-price" class="text-xl font-semibold text-down">-</div>
+                    <div id="down-model" class="text-xs text-gray-500 mt-0.5">-</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Chart Area -->
+              <div class="flex-1 px-4 pb-4 min-h-0">
+                <div class="bg-dark-800/50 border border-dark-600 rounded-xl p-4 h-full flex flex-col">
+                  <div class="flex items-center justify-between mb-3 flex-shrink-0">
+                    <div class="flex items-center gap-2">
+                      <span class="icon text-accent-purple">${icons.barChart}</span>
+                      <span class="font-medium">Live Price Chart</span>
+                    </div>
+                    <div class="flex items-center gap-6 text-xs">
+                      <div class="flex items-center gap-2">
+                        <span class="w-3 h-0.5 bg-accent-purple rounded"></span>
+                        <span class="text-gray-400">Current</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="w-3 h-0.5 bg-accent-blue rounded"></span>
+                        <span class="text-gray-400">Target</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex-1 min-h-0 relative">
+                    <canvas id="priceChart"></canvas>
+                  </div>
+                  <!-- Chart Controls -->
+                  <div class="flex items-center justify-between pt-2 border-t border-dark-600 mt-2">
+                    <div class="flex items-center gap-1">
+                      <button id="live-btn" onclick="goLive()" class="chart-btn px-2 py-1 bg-up/20 text-up rounded text-xs font-medium transition-all flex items-center gap-1" title="Go Live">
+                        <span class="w-2 h-2 bg-up rounded-full animate-pulse"></span> LIVE
+                      </button>
+                      <div class="w-px h-4 bg-dark-600 mx-1"></div>
+                      <button onclick="zoomChart('in')" class="chart-btn px-2 py-1 bg-dark-600 hover:bg-dark-500 rounded text-xs text-gray-400 hover:text-white transition-all" title="Zoom In">
+                        ${icons.zoomIn}
+                      </button>
+                      <button onclick="zoomChart('out')" class="chart-btn px-2 py-1 bg-dark-600 hover:bg-dark-500 rounded text-xs text-gray-400 hover:text-white transition-all" title="Zoom Out">
+                        ${icons.zoomOut}
+                      </button>
+                      <button onclick="resetChartZoom()" class="chart-btn px-2 py-1 bg-dark-600 hover:bg-dark-500 rounded text-xs text-gray-400 hover:text-white transition-all" title="Reset View">
+                        ${icons.reset}
+                      </button>
+                    </div>
+                    <div class="text-xs text-gray-500">
+                      <span class="hidden sm:inline">Scroll to zoom • Drag to pan • </span>
+                      <span id="data-points">0</span> pts
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </main>
+
+            <!-- Right Sidebar -->
+            <aside class="w-80 bg-dark-800/50 border-l border-dark-600 flex flex-col flex-shrink-0 overflow-hidden">
+              
+              <!-- Practice Trading -->
+              <div class="p-4 border-b border-dark-600 flex-shrink-0">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-2">
+                    <span class="icon text-accent-purple">${icons.play}</span>
+                    <span class="font-medium text-sm">Practice Mode</span>
+                  </div>
+                  <button id="paper-toggle" onclick="togglePaperTrading()" class="relative w-12 h-6 rounded-full transition-all bg-dark-600">
+                    <div class="absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-all shadow"></div>
+                  </button>
+                </div>
+                
+                <div class="bg-dark-700/50 rounded-lg p-3">
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs text-gray-500">Cash Balance</span>
+                    <span id="cash-balance" class="font-semibold">$500.00</span>
+                  </div>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-xs text-gray-500">In Positions</span>
+                    <span id="positions-value" class="font-medium text-yellow-400">$0.00</span>
+                  </div>
+                  <div class="flex items-center justify-between mb-1 pt-1 border-t border-dark-600">
+                    <span class="text-xs text-gray-400">Total Value</span>
+                    <span id="total-value" class="font-semibold">$500.00</span>
+                  </div>
+                  <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs text-gray-500">P&L</span>
+                    <span id="pnl-display" class="font-medium text-up">+$0.00 (+0.0%)</span>
+                  </div>
+                  <button onclick="resetPaperTrading()" class="w-full py-1.5 bg-dark-600 hover:bg-dark-500 rounded text-xs text-gray-400 transition-colors flex items-center justify-center gap-1">
+                    <span class="icon">${icons.refresh}</span>
+                    Reset to $500
+                  </button>
+                </div>
+              </div>
+
+              <!-- Technical Indicators -->
+              <div class="flex-1 overflow-y-auto p-4">
+                <div class="flex items-center gap-2 text-sm font-medium mb-3">
+                  <span class="icon text-accent-purple">${icons.activity}</span>
+                  Technical Indicators
+                  <span id="indicator-summary" class="ml-auto text-xs text-gray-500"></span>
+                </div>
+                
+                <div id="indicators" class="space-y-2">
+                  <!-- Updated by JS -->
+                </div>
+              </div>
+
+              <!-- Win/Loss Stats -->
+              <div class="p-4 border-t border-dark-600 bg-dark-800/30 flex-shrink-0">
+                <div class="flex items-center justify-between text-sm mb-2">
+                  <span class="text-gray-400">Win / Loss</span>
+                  <span id="win-loss">
+                    <span class="text-up font-medium">0</span>
+                    <span class="text-gray-600 mx-1">/</span>
+                    <span class="text-down font-medium">0</span>
+                  </span>
+                </div>
+                <div class="w-full bg-dark-600 rounded-full h-1.5 overflow-hidden">
+                  <div id="win-rate-bar" class="h-full bg-gradient-to-r from-up to-up/70" style="width: 0%"></div>
+                </div>
+                <div id="win-rate-text" class="text-center text-xs text-gray-500 mt-1">0% Win Rate</div>
+              </div>
+            </aside>
+          </div>
+        `;
+        
+        // Initialize chart after DOM is ready
+        setTimeout(initChart, 100);
+      }
+
+      // Update specific elements
+      document.getElementById('binance-price').textContent = formatPrice(data.prices?.binance, 0);
+      
+      const timeLeftEl = document.getElementById('time-left');
+      timeLeftEl.textContent = formatTime(timeLeft);
+      timeLeftEl.className = `text-xl font-bold tabular-nums ${timeColor}`;
+      
+      const practiceBalanceEl = document.getElementById('practice-balance');
+      practiceBalanceEl.textContent = formatPrice(paperStatus?.currentBalance || 500);
+      practiceBalanceEl.className = `font-semibold ${pnl >= 0 ? 'text-up' : 'text-down'}`;
+
+      // Signal banner
+      const signalBanner = document.getElementById('signal-banner');
+      signalBanner.className = `border rounded-xl p-4 ${signalInfo.bgClass}`;
+      signalBanner.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl ${signalInfo.color === 'up' ? 'bg-up/20 text-up' : signalInfo.color === 'down' ? 'bg-down/20 text-down' : 'bg-dark-600 text-gray-400'} flex items-center justify-center">
+              <span class="icon text-2xl">${signalInfo.icon}</span>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <h2 class="text-lg font-semibold">${signalInfo.title}</h2>
+                ${signalInfo.showBuy ? `<span class="px-2 py-0.5 text-xs font-bold rounded ${signalInfo.color === 'up' ? 'bg-up text-white' : 'bg-down text-white'}">TRADE NOW</span>` : ''}
+              </div>
+              <p class="text-sm text-gray-400">${signalInfo.subtitle}</p>
+            </div>
+          </div>
+          
+          ${signalInfo.showBuy && signalInfo.signal ? `
+            <div class="flex items-center gap-4">
+              <div class="text-right">
+                <div class="text-xs text-gray-500">Our Model</div>
+                <div class="text-lg font-semibold ${signalInfo.signal.side === 'UP' ? 'text-up' : 'text-down'}">
+                  ${data.model?.[signalInfo.signal.side === 'UP' ? 'upPct' : 'downPct']?.toFixed(1)}%
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-xs text-gray-500">Market</div>
+                <div class="text-lg font-semibold">
+                  ${data.polymarket?.[signalInfo.signal.side === 'UP' ? 'upPct' : 'downPct']?.toFixed(1)}%
+                </div>
+              </div>
+              <div class="text-right px-3 py-2 bg-accent-purple/20 rounded-lg">
+                <div class="text-xs text-accent-light">Edge</div>
+                <div class="text-lg font-bold text-accent-purple">+${signalInfo.signal.edge?.toFixed(1)}%</div>
+              </div>
+            </div>
+          ` : `
+            <div class="flex items-center gap-3 text-sm">
+              <div class="flex items-center gap-1 ${market.bullishCount > market.bearishCount ? 'text-up' : 'text-gray-500'}">
+                <span class="icon">${icons.trendUp}</span>
+                <span>${market.bullishCount}</span>
+              </div>
+              <div class="text-gray-600">vs</div>
+              <div class="flex items-center gap-1 ${market.bearishCount > market.bullishCount ? 'text-down' : 'text-gray-500'}">
+                <span>${market.bearishCount}</span>
+                <span class="icon">${icons.trendDown}</span>
+              </div>
+            </div>
+          `}
+        </div>
+      `;
+
+      // Stats
+      document.getElementById('target-price').textContent = formatPrice(data.prices?.priceToBeat, 0);
+      
+      const currentPriceEl = document.getElementById('current-price');
+      const newPrice = formatPrice(data.prices?.chainlink);
+      const priceChanged = currentPriceEl.textContent !== newPrice && currentPriceEl.textContent !== '-';
+      currentPriceEl.textContent = newPrice;
+      // Green if above target, red if below
+      currentPriceEl.className = `text-xl font-semibold ${priceDelta >= 0 ? 'text-up' : 'text-down'}`;
+      
+      // Add pulse animation when price changes
+      if (priceChanged) {
+        currentPriceEl.classList.add('price-updated');
+        setTimeout(() => currentPriceEl.classList.remove('price-updated'), 300);
+      }
+      
+      const priceDeltaEl = document.getElementById('price-delta');
+      priceDeltaEl.textContent = `${priceDelta >= 0 ? '+' : ''}${formatPrice(priceDelta)} from target`;
+      priceDeltaEl.className = `text-xs mt-0.5 ${priceDelta >= 0 ? 'text-up' : 'text-down'}`;
+      priceDeltaEl.className = `text-xs mt-0.5 ${priceDelta >= 0 ? 'text-up' : 'text-down'}`;
+      
+      document.getElementById('up-price').textContent = data.polymarket?.upPrice ? (data.polymarket.upPrice * 100).toFixed(0) + '¢' : '-';
+      document.getElementById('up-model').textContent = `Model says ${data.model?.upPct?.toFixed(0) || '-'}%`;
+      document.getElementById('down-price').textContent = data.polymarket?.downPrice ? (data.polymarket.downPrice * 100).toFixed(0) + '¢' : '-';
+      document.getElementById('down-model').textContent = `Model says ${data.model?.downPct?.toFixed(0) || '-'}%`;
+
+      // Indicators
+      document.getElementById('indicator-summary').textContent = `${market.bullishCount} bullish / ${market.bearishCount} bearish`;
+      document.getElementById('indicators').innerHTML = `
+        <div class="indicator-card bg-dark-700/50 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-gray-400">Trend</span>
+              <span class="tooltip-trigger text-gray-500 hover:text-gray-300">
+                ${icons.info}
+                <span class="tooltip-content">${indicatorTooltips.trend}</span>
+              </span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded ${data.indicators?.heikenAshi?.color === 'green' ? 'bg-up/20 text-up' : data.indicators?.heikenAshi?.color === 'red' ? 'bg-down/20 text-down' : 'bg-gray-600 text-gray-300'}">
+              ${data.indicators?.heikenAshi?.color === 'green' ? 'BULLISH' : data.indicators?.heikenAshi?.color === 'red' ? 'BEARISH' : 'NEUTRAL'}
+            </span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="font-semibold ${data.indicators?.heikenAshi?.color === 'green' ? 'text-up' : data.indicators?.heikenAshi?.color === 'red' ? 'text-down' : 'text-gray-400'}">
+              ${data.indicators?.heikenAshi?.count || 0} candles
+            </span>
+            <span class="text-xs text-gray-500">${data.indicators?.heikenAshi?.count > 3 ? 'Strong' : 'Weak'}</span>
+          </div>
+        </div>
+
+        <div class="indicator-card bg-dark-700/50 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-gray-400">RSI</span>
+              <span class="tooltip-trigger text-gray-500 hover:text-gray-300">
+                ${icons.info}
+                <span class="tooltip-content">${indicatorTooltips.rsi}</span>
+              </span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded ${data.indicators?.rsi?.value > 55 ? 'bg-up/20 text-up' : data.indicators?.rsi?.value < 45 ? 'bg-down/20 text-down' : 'bg-gray-600 text-gray-300'}">
+              ${data.indicators?.rsi?.value > 70 ? 'OVERBOUGHT' : data.indicators?.rsi?.value > 55 ? 'BULLISH' : data.indicators?.rsi?.value < 30 ? 'OVERSOLD' : data.indicators?.rsi?.value < 45 ? 'BEARISH' : 'NEUTRAL'}
+            </span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="font-semibold">${data.indicators?.rsi?.value?.toFixed(1) || '-'}</span>
+            <div class="w-20 bg-dark-600 rounded-full h-1.5 overflow-hidden">
+              <div class="h-full ${data.indicators?.rsi?.value > 50 ? 'bg-up' : 'bg-down'}" style="width: ${data.indicators?.rsi?.value || 50}%"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="indicator-card bg-dark-700/50 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-gray-400">MACD</span>
+              <span class="tooltip-trigger text-gray-500 hover:text-gray-300">
+                ${icons.info}
+                <span class="tooltip-content">${indicatorTooltips.macd}</span>
+              </span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded ${data.indicators?.macd?.hist > 0 ? 'bg-up/20 text-up' : data.indicators?.macd?.hist < 0 ? 'bg-down/20 text-down' : 'bg-gray-600 text-gray-300'}">
+              ${data.indicators?.macd?.hist > 0 ? 'BUY' : data.indicators?.macd?.hist < 0 ? 'SELL' : 'NEUTRAL'}
+            </span>
+          </div>
+          <span class="font-semibold ${data.indicators?.macd?.hist > 0 ? 'text-up' : data.indicators?.macd?.hist < 0 ? 'text-down' : ''}">
+            ${data.indicators?.macd?.label || 'N/A'}
+          </span>
+        </div>
+
+        <div class="indicator-card bg-dark-700/50 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-gray-400">VWAP</span>
+              <span class="tooltip-trigger text-gray-500 hover:text-gray-300">
+                ${icons.info}
+                <span class="tooltip-content">${indicatorTooltips.vwap}</span>
+              </span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded ${data.indicators?.vwap?.dist > 0 ? 'bg-up/20 text-up' : data.indicators?.vwap?.dist < 0 ? 'bg-down/20 text-down' : 'bg-gray-600 text-gray-300'}">
+              ${data.indicators?.vwap?.dist > 0 ? 'ABOVE' : data.indicators?.vwap?.dist < 0 ? 'BELOW' : 'AT'}
+            </span>
+          </div>
+          <span class="font-semibold ${data.indicators?.vwap?.dist > 0 ? 'text-up' : data.indicators?.vwap?.dist < 0 ? 'text-down' : ''}">
+            ${data.indicators?.vwap?.dist ? (data.indicators.vwap.dist > 0 ? '+' : '') + (data.indicators.vwap.dist * 100).toFixed(2) + '%' : '-'}
+          </span>
+        </div>
+
+        <div class="indicator-card bg-dark-700/50 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-gray-400">1 Min Change</span>
+              <span class="tooltip-trigger text-gray-500 hover:text-gray-300">
+                ${icons.info}
+                <span class="tooltip-content">${indicatorTooltips.delta1m}</span>
+              </span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded ${data.indicators?.delta?.m1 > 0 ? 'bg-up/20 text-up' : data.indicators?.delta?.m1 < 0 ? 'bg-down/20 text-down' : 'bg-gray-600 text-gray-300'}">
+              ${data.indicators?.delta?.m1 > 0 ? 'UP' : data.indicators?.delta?.m1 < 0 ? 'DOWN' : 'FLAT'}
+            </span>
+          </div>
+          <span class="font-semibold ${data.indicators?.delta?.m1 > 0 ? 'text-up' : data.indicators?.delta?.m1 < 0 ? 'text-down' : ''}">
+            ${data.indicators?.delta?.m1 ? (data.indicators.delta.m1 > 0 ? '+' : '') + '$' + data.indicators.delta.m1.toFixed(2) : '-'}
+          </span>
+        </div>
+
+        <div class="indicator-card bg-dark-700/50 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-1">
+              <span class="text-xs text-gray-400">3 Min Change</span>
+              <span class="tooltip-trigger text-gray-500 hover:text-gray-300">
+                ${icons.info}
+                <span class="tooltip-content">${indicatorTooltips.delta3m}</span>
+              </span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded ${data.indicators?.delta?.m3 > 0 ? 'bg-up/20 text-up' : data.indicators?.delta?.m3 < 0 ? 'bg-down/20 text-down' : 'bg-gray-600 text-gray-300'}">
+              ${data.indicators?.delta?.m3 > 0 ? 'UP' : data.indicators?.delta?.m3 < 0 ? 'DOWN' : 'FLAT'}
+            </span>
+          </div>
+          <span class="font-semibold ${data.indicators?.delta?.m3 > 0 ? 'text-up' : data.indicators?.delta?.m3 < 0 ? 'text-down' : ''}">
+            ${data.indicators?.delta?.m3 ? (data.indicators.delta.m3 > 0 ? '+' : '') + '$' + data.indicators.delta.m3.toFixed(2) : '-'}
+          </span>
+        </div>
+      `;
+
+      // Paper trading
+      const paperToggle = document.getElementById('paper-toggle');
+      paperToggle.className = `relative w-12 h-6 rounded-full transition-all ${paperStatus?.enabled ? 'bg-accent-purple' : 'bg-dark-600'}`;
+      paperToggle.innerHTML = `<div class="absolute top-1 ${paperStatus?.enabled ? 'right-1' : 'left-1'} w-4 h-4 bg-white rounded-full transition-all shadow"></div>`;
+      
+      const positionsValue = paperStatus?.openPositionsValue || 0;
+      document.getElementById('cash-balance').textContent = formatPrice(paperStatus?.currentBalance || 500);
+      document.getElementById('positions-value').textContent = formatPrice(positionsValue);
+      document.getElementById('positions-value').className = `font-medium ${positionsValue > 0 ? 'text-yellow-400' : 'text-gray-500'}`;
+      document.getElementById('total-value').textContent = formatPrice(paperStatus?.totalValue || 500);
+      
+      const pnlDisplay = document.getElementById('pnl-display');
+      pnlDisplay.textContent = `${pnl >= 0 ? '+' : ''}${formatPrice(pnl)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`;
+      pnlDisplay.className = `font-medium ${pnl >= 0 ? 'text-up' : 'text-down'}`;
+      
+      document.getElementById('win-loss').innerHTML = `
+        <span class="text-up font-medium">${paperStatus?.stats?.wins || 0}</span>
+        <span class="text-gray-600 mx-1">/</span>
+        <span class="text-down font-medium">${paperStatus?.stats?.losses || 0}</span>
+      `;
+      document.getElementById('win-rate-bar').style.width = `${paperStatus?.stats?.winRate || 0}%`;
+      document.getElementById('win-rate-text').textContent = `${paperStatus?.stats?.winRate || 0}% Win Rate`;
+
+      // Trade list
+      if (paperStatus?.recentTrades?.length > 0) {
+        document.getElementById('trade-list').innerHTML = `
+          <div class="space-y-2">
+            ${paperStatus.recentTrades.slice(0, 20).map(t => `
+              <div class="bg-dark-700/50 hover:bg-dark-700 rounded-lg p-3 transition-colors">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    <span class="icon ${t.side === 'UP' ? 'text-up' : 'text-down'}">${t.side === 'UP' ? icons.trendUp : icons.trendDown}</span>
+                    <span class="font-medium text-sm">${t.side}</span>
+                  </div>
+                  <span class="text-sm font-medium ${t.pnl === null ? 'text-yellow-400' : t.pnl >= 0 ? 'text-up' : 'text-down'}">
+                    ${t.pnl === null ? 'Pending' : (t.pnl >= 0 ? '+' : '') + formatPrice(t.pnl)}
+                  </span>
+                </div>
+                <div class="flex items-center justify-between text-xs text-gray-500">
+                  <span>${formatPrice(t.entryPrice)}</span>
+                  <span>${formatTimeAgo(t.timestamp)}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+      
+      document.getElementById('market-slug').textContent = data.market?.slug || 'Loading...';
+
+      // Update notification badges
+      const notificationCount = getNotificationCount();
+      const badgeCollapsed = document.getElementById('notification-badge-collapsed');
+      const badge = document.getElementById('notification-badge');
+      
+      if (badgeCollapsed) {
+        if (notificationCount > 0) {
+          badgeCollapsed.textContent = notificationCount;
+          badgeCollapsed.classList.remove('hidden');
+        } else {
+          badgeCollapsed.classList.add('hidden');
+        }
+      }
+      
+      if (badge) {
+        if (notificationCount > 0) {
+          badge.textContent = notificationCount;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      }
+
+      // Update collapsed sidebar win/loss
+      const collapsedWinLoss = document.getElementById('collapsed-win-loss');
+      if (collapsedWinLoss) {
+        collapsedWinLoss.innerHTML = `
+          <div class="text-xs text-up font-medium">${paperStatus?.stats?.wins || 0}</div>
+          <div class="text-[10px] text-gray-600">/</div>
+          <div class="text-xs text-down font-medium">${paperStatus?.stats?.losses || 0}</div>
+        `;
+      }
+    }
+
+    // Tooltip positioning using event delegation (works with dynamically added elements)
+    document.addEventListener('mouseenter', function(e) {
+      const trigger = e.target.closest('.tooltip-trigger');
+      if (!trigger) return;
+      
+      const tooltip = trigger.querySelector('.tooltip-content');
+      if (!tooltip) return;
+      
+      const rect = trigger.getBoundingClientRect();
+      const tooltipWidth = 220;
+      
+      // Position above the icon
+      let left = rect.left + (rect.width / 2) - (tooltipWidth / 2);
+      let top = rect.top - 10;
+      
+      // Keep within viewport horizontally
+      if (left < 10) left = 10;
+      if (left + tooltipWidth > window.innerWidth - 10) {
+        left = window.innerWidth - tooltipWidth - 10;
+      }
+      
+      tooltip.style.left = left + 'px';
+      tooltip.style.bottom = (window.innerHeight - top) + 'px';
+      tooltip.style.top = 'auto';
+    }, true);
+
+    // Start fetching
+    fetchData();
+    fetchPaperStatus();
+    setInterval(fetchData, 1000);
+    setInterval(fetchPaperStatus, 2000);
+  </script>
+</body>
+</html>

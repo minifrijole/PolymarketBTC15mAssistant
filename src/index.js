@@ -667,10 +667,62 @@ async function main() {
               : ANSI.reset)
         : ANSI.reset;
 
+      // === TRADING SIGNAL SECTION ===
+      const edgeUpPct = edge.edgeUp !== null ? (edge.edgeUp * 100).toFixed(1) : null;
+      const edgeDownPct = edge.edgeDown !== null ? (edge.edgeDown * 100).toFixed(1) : null;
+      
+      // Determine signal display
+      let signalDisplay = "";
+      let signalColor = ANSI.gray;
+      let edgeDisplay = "";
+      
+      if (rec.action === "ENTER") {
+        const side = rec.side;
+        const edgePct = side === "UP" ? edgeUpPct : edgeDownPct;
+        const strength = rec.strength;
+        
+        if (strength === "STRONG") {
+          signalColor = side === "UP" ? ANSI.green : ANSI.red;
+          signalDisplay = `★★★ BUY ${side} NOW ★★★`;
+        } else if (strength === "GOOD") {
+          signalColor = side === "UP" ? ANSI.green : ANSI.red;
+          signalDisplay = `★★ BUY ${side} ★★`;
+        } else {
+          signalColor = ANSI.yellow;
+          signalDisplay = `★ BUY ${side} (weak) ★`;
+        }
+        edgeDisplay = `Edge: +${edgePct}% | Phase: ${rec.phase}`;
+      } else {
+        signalDisplay = "HOLD - No Edge";
+        edgeDisplay = `UP edge: ${edgeUpPct ?? "-"}% | DOWN edge: ${edgeDownPct ?? "-"}%`;
+      }
+
+      // Model vs Market comparison
+      const modelUpPct = timeAware.adjustedUp !== null ? (timeAware.adjustedUp * 100).toFixed(0) : "-";
+      const modelDownPct = timeAware.adjustedDown !== null ? (timeAware.adjustedDown * 100).toFixed(0) : "-";
+      const mktUpPct = marketUp !== null ? (marketUp * 100 / (marketUp + marketDown)).toFixed(0) : "-";
+      const mktDownPct = marketDown !== null ? (marketDown * 100 / (marketUp + marketDown)).toFixed(0) : "-";
+      
+      const modelVsMarket = `Model: ${ANSI.green}↑${modelUpPct}%${ANSI.reset}/${ANSI.red}↓${modelDownPct}%${ANSI.reset}  vs  Market: ${ANSI.green}↑${mktUpPct}%${ANSI.reset}/${ANSI.red}↓${mktDownPct}%${ANSI.reset}`;
+
+      // Position sizing suggestion (Kelly-lite: edge / odds)
+      let positionHint = "";
+      if (rec.action === "ENTER" && rec.strength === "STRONG") {
+        positionHint = " | Suggested: 5-10% of bankroll";
+      } else if (rec.action === "ENTER" && rec.strength === "GOOD") {
+        positionHint = " | Suggested: 2-5% of bankroll";
+      }
+
       const lines = [
         titleLine,
         marketLine,
         kv("Time left:", `${timeColor}${fmtTimeLeft(timeLeftMin)}${ANSI.reset}`),
+        "",
+        sepLine(),
+        "",
+        centerText(`${signalColor}${signalDisplay}${ANSI.reset}`, screenWidth()),
+        centerText(`${ANSI.white}${edgeDisplay}${positionHint}${ANSI.reset}`, screenWidth()),
+        centerText(modelVsMarket, screenWidth()),
         "",
         sepLine(),
         "",
